@@ -1,43 +1,46 @@
 import cv2
+import os
 
 from src.gauge_detector import detect_gauge
+from src.needle_detector import detect_needle_line
+from src.scale_detector import detect_scale_ticks
+from src.rpm_calculator import calculate_gauge_value
 
-from src.needle_detector import (
-    create_needle_mask,
-    detect_needle_line
-)
 
-from src.scale_detector import (
-    detect_scale_ticks
-)
+# --------------------------------
+# Folders
+# --------------------------------
 
-from src.rpm_calculator import (
-    calculate_gauge_value
-)
+INPUT_DIR = "data/needle_gauge"
+OUTPUT_DIR = "output"
 
-def main():
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    IMAGE_PATH = (
-        "data/needle_gauge/"
-        "2984.jpg"
-    )
 
-    image = cv2.imread(
-        IMAGE_PATH
-    )
+def process_image(image_path):
+    """
+    Process one gauge image.
+    """
+
+    print("\n" + "=" * 50)
+    print(f"Processing: {image_path}")
+    print("=" * 50)
+
+    # --------------------------------
+    # Read image
+    # --------------------------------
+
+    image = cv2.imread(image_path)
 
     if image is None:
-        raise RuntimeError(
-            f"Could not read image: {IMAGE_PATH}"
-        )
+        print(f"Could not read image: {image_path}")
+        return
 
     # --------------------------------
     # 1. Detect gauge
     # --------------------------------
 
-    cx, cy, radius = detect_gauge(
-        image
-    )
+    cx, cy, radius = detect_gauge(image)
 
     center = (cx, cy)
 
@@ -51,11 +54,12 @@ def main():
     )
 
     # --------------------------------
-    # 2. Detect needle line
+    # 2. Detect needle
     # --------------------------------
 
-    needle_angle, p1, p2 = (
-        detect_needle_line(image, center)
+    needle_angle, p1, p2 = detect_needle_line(
+        image,
+        center
     )
 
     print(
@@ -101,16 +105,13 @@ def main():
     # 4. Calculate RPM
     # --------------------------------
 
-    gauge_value, lower_tick, fraction = (
-    calculate_gauge_value(
+    (
+        gauge_value,
+        lower_tick,
+        fraction
+    ) = calculate_gauge_value(
         needle_angle,
         tick_angles
-    )
-)
-
-    print(
-        f"Needle angle: "
-        f"{needle_angle:.2f} degrees"
     )
 
     print(
@@ -129,7 +130,7 @@ def main():
     )
 
     # --------------------------------
-    # 5. Visualization
+    # 5. Create visualization
     # --------------------------------
 
     result = image.copy()
@@ -152,7 +153,7 @@ def main():
         4
     )
 
-    # Center
+    # Center point
     cv2.circle(
         result,
         center,
@@ -161,7 +162,7 @@ def main():
         -1
     )
 
-    # Display values
+    # Display angle
     cv2.putText(
         result,
         f"Angle: {needle_angle:.2f} deg",
@@ -172,6 +173,7 @@ def main():
         2
     )
 
+    # Display RPM
     cv2.putText(
         result,
         f"RPM: {gauge_value:.2f}",
@@ -182,14 +184,111 @@ def main():
         2
     )
 
-    cv2.imshow(
-        "Needle Gauge Detection",
+    # --------------------------------
+    # 6. Save result
+    # --------------------------------
+
+    filename = os.path.basename(image_path)
+
+    name, extension = os.path.splitext(
+        filename
+    )
+
+    output_path = os.path.join(
+        OUTPUT_DIR,
+        f"{name}_result.jpg"
+    )
+
+    cv2.imwrite(
+        output_path,
         result
     )
 
-    cv2.waitKey(0)
+    print(
+        f"Result saved to: {output_path}"
+    )
 
-    cv2.destroyAllWindows()
+
+def main():
+
+    # --------------------------------
+    # Find all images
+    # --------------------------------
+
+    image_extensions = (
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".bmp"
+    )
+
+    image_files = [
+        filename
+        for filename in os.listdir(INPUT_DIR)
+        if filename.lower().endswith(
+            image_extensions
+        )
+    ]
+
+    # --------------------------------
+    # Check if images exist
+    # --------------------------------
+
+    if not image_files:
+
+        print(
+            f"No images found in: "
+            f"{INPUT_DIR}"
+        )
+
+        return
+
+    print(
+        f"Found {len(image_files)} "
+        f"image(s)."
+    )
+
+    # --------------------------------
+    # Process every image
+    # --------------------------------
+
+    for filename in image_files:
+
+        image_path = os.path.join(
+            INPUT_DIR,
+            filename
+        )
+
+        try:
+
+            process_image(
+                image_path
+            )
+
+        except Exception as error:
+
+            print(
+                f"ERROR processing "
+                f"{filename}: {error}"
+            )
+
+    # --------------------------------
+    # Finished
+    # --------------------------------
+
+    print("\n" + "=" * 50)
+
+    print(
+        f"Finished processing "
+        f"{len(image_files)} image(s)."
+    )
+
+    print(
+        f"Results saved in: "
+        f"{OUTPUT_DIR}"
+    )
+
+    print("=" * 50)
 
 
 if __name__ == "__main__":
