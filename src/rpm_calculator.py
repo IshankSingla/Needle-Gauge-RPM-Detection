@@ -2,23 +2,6 @@ def normalize_angle(angle):
     return angle % 360.0
 
 
-def unwrap_angle(angle, reference):
-    """
-    Put angle into the same continuous 360-degree
-    range as reference.
-    """
-
-    angle = normalize_angle(angle)
-
-    while angle < reference:
-        angle += 360.0
-
-    while angle >= reference + 360.0:
-        angle -= 360.0
-
-    return angle
-
-
 def calculate_gauge_value(
     needle_angle,
     tick_angles,
@@ -27,12 +10,13 @@ def calculate_gauge_value(
     """
     Convert needle angle into a continuous gauge value.
 
-    tick_angles:
-        Detected physical tick angles from the image.
+    If the needle is sufficiently close to a physical
+    tick, the exact tick value is returned.
 
-    value_per_tick:
-        Value represented by one tick.
-        For this gauge: 100 RPM.
+    Otherwise, the value is calculated continuously
+    between the surrounding ticks.
+
+    No expected image values are hardcoded.
     """
 
     if len(tick_angles) < 2:
@@ -41,7 +25,7 @@ def calculate_gauge_value(
         )
 
     # -----------------------------------------
-    # Normalize and unwrap tick angles
+    # Normalize tick angles
     # -----------------------------------------
 
     ticks = [
@@ -51,6 +35,10 @@ def calculate_gauge_value(
 
     start_angle = ticks[0]
 
+    # -----------------------------------------
+    # Unwrap ticks
+    # -----------------------------------------
+
     unwrapped_ticks = []
 
     for angle in ticks:
@@ -58,87 +46,176 @@ def calculate_gauge_value(
         while angle < start_angle:
             angle += 360.0
 
-        unwrapped_ticks.append(angle)
+        unwrapped_ticks.append(
+            angle
+        )
 
     # -----------------------------------------
-    # Normalize needle angle
+    # Normalize needle
     # -----------------------------------------
 
-    needle = normalize_angle(needle_angle)
+    needle = normalize_angle(
+        needle_angle
+    )
 
-    while needle < start_angle:
+    # -----------------------------------------
+    # Handle first tick correctly
+    # -----------------------------------------
+
+    first_difference = (
+        start_angle -
+        needle
+    )
+
+    if (
+        first_difference >= 0
+        and
+        first_difference <= 2.0
+    ):
+        needle = start_angle
+
+    elif needle < start_angle:
         needle += 360.0
 
     # -----------------------------------------
-    # Boundary tolerance
+    # Calculate tick spacing
     # -----------------------------------------
 
-    tolerance = 0.5
+    spacings = []
 
-    # If needle is extremely close to first tick,
-    # treat it as exactly 0 RPM.
-    if abs(
-        needle - unwrapped_ticks[0]
-    ) <= tolerance:
+    for i in range(
+        len(unwrapped_ticks) - 1
+    ):
+
+        spacing = (
+            unwrapped_ticks[i + 1]
+            -
+            unwrapped_ticks[i]
+        )
+
+        if spacing > 0:
+            spacings.append(
+                spacing
+            )
+
+    if not spacings:
+        raise ValueError(
+            "Could not determine tick spacing."
+        )
+
+    # Median is more robust than using
+    # only one tick interval.
+    spacings.sort()
+
+    middle = len(spacings) // 2
+
+    if len(spacings) % 2 == 0:
+
+        median_spacing = (
+            spacings[middle - 1]
+            +
+            spacings[middle]
+        ) / 2.0
+
+    else:
+
+        median_spacing = (
+            spacings[middle]
+        )
+
+    # -----------------------------------------
+    # Snap only when very close to a tick
+    # -----------------------------------------
+
+    snap_tolerance = (
+        median_spacing * 0.15
+    )
+
+    nearest_index = None
+    nearest_distance = float("inf")
+
+    for i, tick in enumerate(
+        unwrapped_ticks
+    ):
+
+        distance = abs(
+            needle - tick
+        )
+
+        if distance < nearest_distance:
+
+            nearest_distance = distance
+            nearest_index = i
+
+    if (
+        nearest_index is not None
+        and
+        nearest_distance <= snap_tolerance
+    ):
+
+        exact_value = (
+            nearest_index *
+            value_per_tick
+        )
 
         return (
-            0.0,
-            0,
+            float(exact_value),
+            nearest_index,
             0.0
         )
 
-    # If needle is extremely close to last tick,
-    # treat it as the maximum gauge value.
-    if abs(
-        needle - unwrapped_ticks[-1]
-    ) <= tolerance:
-
-        return (
-            float(
-                (len(unwrapped_ticks) - 1)
-                * value_per_tick
-            ),
-            len(unwrapped_ticks) - 1,
-            1.0
-        )
-
     # -----------------------------------------
-    # Allow small numerical error outside
-    # the detected gauge scale
+    # Check lower and upper boundaries
     # -----------------------------------------
 
     if needle < unwrapped_ticks[0]:
 
         difference = (
-            unwrapped_ticks[0] - needle
+            unwrapped_ticks[0]
+            -
+            needle
         )
 
         if difference <= 2.0:
-            needle = unwrapped_ticks[0]
 
-        else:
-            raise ValueError(
-                "Needle angle is below "
-                "the detected gauge scale."
+            return (
+                0.0,
+                0,
+                0.0
             )
+
+        raise ValueError(
+            "Needle angle is below "
+            "the detected gauge scale."
+        )
 
     if needle > unwrapped_ticks[-1]:
 
         difference = (
-            needle - unwrapped_ticks[-1]
+            needle
+            -
+            unwrapped_ticks[-1]
         )
 
         if difference <= 2.0:
-            needle = unwrapped_ticks[-1]
 
-        else:
-            raise ValueError(
-                "Needle angle is above "
-                "the detected gauge scale."
+            return (
+                float(
+                    (len(unwrapped_ticks) - 1)
+                    *
+                    value_per_tick
+                ),
+                len(unwrapped_ticks) - 1,
+                1.0
             )
 
+        raise ValueError(
+            "Needle angle is above "
+            "the detected gauge scale."
+        )
+
     # -----------------------------------------
-    # Find the two surrounding ticks
+    # Find surrounding ticks
     # -----------------------------------------
 
     lower_index = None
@@ -147,8 +224,13 @@ def calculate_gauge_value(
         len(unwrapped_ticks) - 1
     ):
 
-        lower = unwrapped_ticks[i]
-        upper = unwrapped_ticks[i + 1]
+        lower = (
+            unwrapped_ticks[i]
+        )
+
+        upper = (
+            unwrapped_ticks[i + 1]
+        )
 
         if (
             lower <= needle <= upper
@@ -157,27 +239,7 @@ def calculate_gauge_value(
             lower_index = i
             break
 
-    # -----------------------------------------
-    # Needle exactly at final tick
-    # -----------------------------------------
-
     if lower_index is None:
-
-        if (
-            abs(
-                needle -
-                unwrapped_ticks[-1]
-            ) <= 2.0
-        ):
-
-            return (
-                float(
-                    (len(unwrapped_ticks) - 1)
-                    * value_per_tick
-                ),
-                len(unwrapped_ticks) - 1,
-                1.0
-            )
 
         raise ValueError(
             "Could not locate needle "
@@ -185,7 +247,7 @@ def calculate_gauge_value(
         )
 
     # -----------------------------------------
-    # Get surrounding tick angles
+    # Calculate continuous position
     # -----------------------------------------
 
     lower_angle = (
@@ -200,10 +262,6 @@ def calculate_gauge_value(
         ]
     )
 
-    # -----------------------------------------
-    # Calculate angular distance
-    # -----------------------------------------
-
     angular_distance = (
         upper_angle -
         lower_angle
@@ -215,30 +273,29 @@ def calculate_gauge_value(
             "Invalid tick spacing."
         )
 
-    # -----------------------------------------
-    # Calculate position between ticks
-    # -----------------------------------------
-
     fraction = (
         needle -
         lower_angle
     ) / angular_distance
 
-    # Prevent tiny numerical errors
-    # from producing values outside 0-1.
     fraction = max(
         0.0,
-        min(1.0, fraction)
+        min(
+            1.0,
+            fraction
+        )
     )
 
     # -----------------------------------------
-    # Calculate continuous RPM
+    # Continuous value
     # -----------------------------------------
 
     value = (
         lower_index +
         fraction
     ) * value_per_tick
+
+    value = round(value, -1)       # Report the reading to the nearest 10 RPM
 
     return (
         float(value),

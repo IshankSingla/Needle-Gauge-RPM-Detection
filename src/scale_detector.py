@@ -8,8 +8,6 @@ def estimate_outer_radius(image, center):
     """
     Estimate the outer radius of the gauge by finding
     the strongest circular white ring.
-
-    This is independent of HoughCircles.
     """
 
     cx, cy = center
@@ -24,8 +22,10 @@ def estimate_outer_radius(image, center):
         cv2.COLOR_BGR2HSV
     )
 
-    # White pixels:
-    # high brightness + relatively low saturation
+    # -----------------------------------------
+    # Detect white pixels
+    # -----------------------------------------
+
     white_mask = (
         (gray > 180) &
         (hsv[:, :, 1] < 100)
@@ -61,15 +61,21 @@ def estimate_outer_radius(image, center):
         )
 
         if np.any(ring):
+
             profile.append(
                 white_mask[ring].mean()
             )
+
         else:
+
             profile.append(0)
 
     profile = np.array(profile)
 
+    # -----------------------------------------
     # Smooth radial profile
+    # -----------------------------------------
+
     smoothed = gaussian_filter1d(
         profile,
         sigma=2
@@ -81,18 +87,26 @@ def estimate_outer_radius(image, center):
         distance=10
     )
 
+    # -----------------------------------------
     # Keep strong circular structures
+    # -----------------------------------------
+
     valid_peaks = [
-        p for p in peaks
+        p
+        for p in peaks
         if smoothed[p] > 0.4
     ]
 
     if not valid_peaks:
+
         raise RuntimeError(
             "Could not detect outer gauge ring."
         )
 
-    # The outermost strong ring is the gauge border
+    # -----------------------------------------
+    # Select outermost strong ring
+    # -----------------------------------------
+
     best_peak = max(
         valid_peaks,
         key=lambda p: radii[p]
@@ -127,7 +141,10 @@ def detect_scale_ticks(image, center):
         center
     )
 
-    # Tick marks are inside the outer ring
+    # -----------------------------------------
+    # Define tick detection region
+    # -----------------------------------------
+
     inner_radius = int(
         outer_radius * 0.84
     )
@@ -135,6 +152,10 @@ def detect_scale_ticks(image, center):
     tick_outer_radius = int(
         outer_radius * 1.02
     )
+
+    # -----------------------------------------
+    # Create white-pixel mask
+    # -----------------------------------------
 
     gray = cv2.cvtColor(
         image,
@@ -197,15 +218,21 @@ def detect_scale_ticks(image, center):
         ]
 
         if len(values) == 0:
+
             scores.append(0)
+
         else:
+
             scores.append(
                 values.mean()
             )
 
     scores = np.array(scores)
 
+    # -----------------------------------------
     # Smooth angular signal
+    # -----------------------------------------
+
     scores = cv2.GaussianBlur(
         scores.reshape(-1, 1),
         (1, 11),
@@ -243,11 +270,12 @@ def detect_scale_ticks(image, center):
 
             spacing = (
                 detected_angles[i]
-                - detected_angles[i - 1]
+                -
+                detected_angles[i - 1]
             )
 
-            # Adjacent ticks are approximately
-            # 7–8 degrees apart.
+            # Adjacent ticks should be
+            # approximately 7–8 degrees apart.
             if not (
                 5.5 <= spacing <= 10
             ):
@@ -274,59 +302,42 @@ def detect_scale_ticks(image, center):
             )
 
     if not runs:
+
         raise RuntimeError(
             "Could not detect gauge tick marks."
         )
 
-    # Longest continuous sequence
+    # -----------------------------------------
+    # Select longest continuous sequence
+    # -----------------------------------------
+
     tick_angles = max(
         runs,
         key=len
     )
 
     if len(tick_angles) < 10:
+
         raise RuntimeError(
             "Too few gauge ticks detected."
         )
 
     # -----------------------------------------
-# Refine tick angles using uniform spacing
-# -----------------------------------------
+    # Use detected physical tick positions
+    # directly.
+    #
+    # IMPORTANT:
+    # No polyfit / artificial uniform spacing.
+    # -----------------------------------------
 
-    if len(tick_angles) >= 10:
+    tick_angles = np.asarray(
+        tick_angles,
+        dtype=np.float64
+    )
 
-        # The gauge has evenly spaced tick marks.
-        #
-        # Fit:
-        #
-        # angle = a * tick_index + b
-        #
-        # This reduces small peak-detection noise.
-
-        indices = np.arange(
-            len(tick_angles),
-            dtype=np.float32
-        )
-
-        angles_unwrapped = (
-            tick_angles.copy()
-        )
-
-        # Linear regression
-        slope, intercept = np.polyfit(
-            indices,
-            angles_unwrapped,
-            1
-        )
-
-        refined_ticks = (
-            slope * indices +
-            intercept
-        )
-
-        tick_angles = refined_ticks.astype(
-            np.float64
-        )
+    # -----------------------------------------
+    # Calculate scale boundaries
+    # -----------------------------------------
 
     start_angle = float(
         tick_angles[0]
@@ -335,6 +346,10 @@ def detect_scale_ticks(image, center):
     end_angle = float(
         tick_angles[-1]
     )
+
+    # -----------------------------------------
+    # Return results
+    # -----------------------------------------
 
     return (
         tick_angles,
