@@ -19,7 +19,7 @@ def main():
 
     IMAGE_PATH = (
         "data/needle_gauge/"
-        "895.590073713866.jpg"
+        "2984.jpg"
     )
 
     image = cv2.imread(
@@ -75,11 +75,11 @@ def main():
     (
         tick_angles,
         start_angle,
-        end_angle
+        end_angle,
+        scale_radius
     ) = detect_scale_ticks(
         image,
-        center,
-        radius
+        center
     )
 
     print(
@@ -101,22 +101,31 @@ def main():
     # 4. Calculate RPM
     # --------------------------------
 
-    scale_value, rpm = (
-        calculate_gauge_value(
-            needle_angle,
-            start_angle,
-            end_angle
-        )
+    gauge_value, lower_tick, fraction = (
+    calculate_gauge_value(
+        needle_angle,
+        tick_angles
+    )
+)
+
+    print(
+        f"Needle angle: "
+        f"{needle_angle:.2f} degrees"
     )
 
     print(
-        f"Gauge value: "
-        f"{scale_value:.2f}"
+        f"Lower tick: "
+        f"{lower_tick}"
     )
 
     print(
-        f"RPM: "
-        f"{rpm:.2f}"
+        f"Position between ticks: "
+        f"{fraction * 100:.2f}%"
+    )
+
+    print(
+        f"Gauge reading: "
+        f"{gauge_value:.2f} RPM"
     )
 
     # --------------------------------
@@ -165,7 +174,7 @@ def main():
 
     cv2.putText(
         result,
-        f"RPM: {rpm:.2f}",
+        f"RPM: {gauge_value:.2f}",
         (20, 70),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.8,

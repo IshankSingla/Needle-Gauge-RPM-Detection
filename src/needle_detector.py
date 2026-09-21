@@ -255,13 +255,12 @@ def calculate_needle_angle(
 
 def detect_needle_line(image, center):
     """
-    Detect the needle line and determine its actual
-    direction from the gauge center toward the needle tip.
+    Detect the longest valid colored line that represents
+    the gauge needle.
 
-    Returns:
-        angle
-        line start
-        line end
+    The Hough transform does not guarantee the direction
+    of a line, so after detecting the line we explicitly
+    orient it from the gauge center toward the needle tip.
     """
 
     hsv = cv2.cvtColor(
@@ -269,7 +268,7 @@ def detect_needle_line(image, center):
         cv2.COLOR_BGR2HSV
     )
 
-    # Keep the color range that is currently working
+    # Keep the currently working color range.
     lower = np.array([0, 100, 80])
     upper = np.array([28, 255, 255])
 
@@ -279,7 +278,7 @@ def detect_needle_line(image, center):
         upper
     )
 
-    # Connect small gaps
+    # Connect small gaps.
     kernel = np.ones(
         (3, 3),
         np.uint8
@@ -291,6 +290,7 @@ def detect_needle_line(image, center):
         kernel
     )
 
+    # Detect line segments.
     lines = cv2.HoughLinesP(
         mask,
         rho=1,
@@ -321,12 +321,67 @@ def detect_needle_line(image, center):
         dx = x2 - x1
         dy = y2 - y1
 
-        length = np.hypot(dx, dy)
+        length = np.hypot(
+            dx,
+            dy
+        )
 
         if length < 80:
             continue
 
-        # Distance of both endpoints from gauge center
+        # ---------------------------------------
+        # Distance from gauge center to line
+        # ---------------------------------------
+
+        line_distance = abs(
+            dy * cx
+            - dx * cy
+            + x2 * y1
+            - y2 * x1
+        ) / length
+
+        # Ignore lines that are far from center.
+        if line_distance > 45:
+            continue
+
+        # ---------------------------------------
+        # Check whether the line points radially
+        # ---------------------------------------
+
+        # Midpoint of line
+        mx = (x1 + x2) / 2
+        my = (y1 + y2) / 2
+
+        radial_dx = mx - cx
+        radial_dy = my - cy
+
+        radial_length = np.hypot(
+            radial_dx,
+            radial_dy
+        )
+
+        if radial_length == 0:
+            continue
+
+        radial_dx /= radial_length
+        radial_dy /= radial_length
+
+        line_dx = dx / length
+        line_dy = dy / length
+
+        alignment = abs(
+            line_dx * radial_dx +
+            line_dy * radial_dy
+        )
+
+        # Needle should be approximately radial.
+        if alignment < 0.85:
+            continue
+
+        # ---------------------------------------
+        # Determine actual tip
+        # ---------------------------------------
+
         distance_1 = np.hypot(
             x1 - cx,
             y1 - cy
@@ -337,17 +392,36 @@ def detect_needle_line(image, center):
             y2 - cy
         )
 
-        # The farther endpoint should be the needle tip
         if distance_1 > distance_2:
-            tip_x, tip_y = x1, y1
-            base_x, base_y = x2, y2
-        else:
-            tip_x, tip_y = x2, y2
-            base_x, base_y = x1, y1
 
-        # Calculate angle FROM CENTER TO TIP
-        tip_dx = tip_x - cx
-        tip_dy = tip_y - cy
+            tip = (
+                int(x1),
+                int(y1)
+            )
+
+            base = (
+                int(x2),
+                int(y2)
+            )
+
+        else:
+
+            tip = (
+                int(x2),
+                int(y2)
+            )
+
+            base = (
+                int(x1),
+                int(y1)
+            )
+
+        # ---------------------------------------
+        # Calculate angle CENTER -> TIP
+        # ---------------------------------------
+
+        tip_dx = tip[0] - cx
+        tip_dy = tip[1] - cy
 
         angle = np.degrees(
             np.arctan2(
@@ -358,38 +432,30 @@ def detect_needle_line(image, center):
 
         angle %= 360
 
-        # How close is the line to the center?
-        line_vector = np.array(
-            [dx, dy],
-            dtype=np.float32
-        )
+        # ---------------------------------------
+        # Score candidate
+        # ---------------------------------------
 
-        line_length = np.linalg.norm(
-            line_vector
-        )
+        # Prefer:
+        # - long lines
+        # - close to center
+        # - strongly radial lines
 
-        line_vector /= line_length
-
-        center_vector = np.array(
-            [cx - base_x, cy - base_y],
-            dtype=np.float32
-        )
-
-        # Distance from center to the line
-        cross = abs(
-            np.cross(
-                line_vector,
-                center_vector
-            )
+        score = (
+            length
+            * alignment
+            / (1 + line_distance)
         )
 
         candidates.append(
             (
-                cross,
+                score,
                 length,
+                line_distance,
+                alignment,
                 angle,
-                (int(base_x), int(base_y)),
-                (int(tip_x), int(tip_y))
+                base,
+                tip
             )
         )
 
@@ -398,19 +464,17 @@ def detect_needle_line(image, center):
             "No suitable needle line found."
         )
 
-    # Prefer lines that:
-    # 1. pass close to the gauge center
-    # 2. are long
+    # Highest score is the best needle candidate.
     candidates.sort(
-        key=lambda x: (
-            x[0],
-            -x[1]
-        )
+        key=lambda item: item[0],
+        reverse=True
     )
 
     (
-        center_distance,
+        score,
         length,
+        line_distance,
+        alignment,
         angle,
         base,
         tip
