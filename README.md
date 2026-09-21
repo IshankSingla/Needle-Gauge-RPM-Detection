@@ -318,7 +318,3 @@ This means input images can be swapped out freely without ever touching the code
 | `src/rpm_calculator.py` | Converts detected needle position into an RPM value |
 
 ---
-
-## Repository
-
-[https://github.com/IshankSingla/HIL-Test-Automation](https://github.com/IshankSingla/HIL-Test-Automation)
