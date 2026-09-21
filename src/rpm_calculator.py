@@ -64,52 +64,74 @@ def calculate_gauge_value(
     # Normalize needle angle
     # -----------------------------------------
 
-    needle = normalize_angle(
-        needle_angle
-    )
+    needle = normalize_angle(needle_angle)
 
     while needle < start_angle:
         needle += 360.0
 
     # -----------------------------------------
-    # Allow tiny numerical error at the
-    # beginning and end of the gauge.
+    # Boundary tolerance
     # -----------------------------------------
 
-    tolerance = 2.0
+    tolerance = 0.5
+
+    # If needle is extremely close to first tick,
+    # treat it as exactly 0 RPM.
+    if abs(
+        needle - unwrapped_ticks[0]
+    ) <= tolerance:
+
+        return (
+            0.0,
+            0,
+            0.0
+        )
+
+    # If needle is extremely close to last tick,
+    # treat it as the maximum gauge value.
+    if abs(
+        needle - unwrapped_ticks[-1]
+    ) <= tolerance:
+
+        return (
+            float(
+                (len(unwrapped_ticks) - 1)
+                * value_per_tick
+            ),
+            len(unwrapped_ticks) - 1,
+            1.0
+        )
+
+    # -----------------------------------------
+    # Allow small numerical error outside
+    # the detected gauge scale
+    # -----------------------------------------
 
     if needle < unwrapped_ticks[0]:
 
         difference = (
-            unwrapped_ticks[0] -
-            needle
+            unwrapped_ticks[0] - needle
         )
 
-        if difference <= tolerance:
-
+        if difference <= 2.0:
             needle = unwrapped_ticks[0]
 
         else:
-
             raise ValueError(
                 "Needle angle is below "
                 "the detected gauge scale."
             )
 
-
     if needle > unwrapped_ticks[-1]:
 
         difference = (
-            needle -
-            unwrapped_ticks[-1]
+            needle - unwrapped_ticks[-1]
         )
 
-        if difference <= tolerance:
-
+        if difference <= 2.0:
             needle = unwrapped_ticks[-1]
 
         else:
-
             raise ValueError(
                 "Needle angle is above "
                 "the detected gauge scale."
@@ -145,7 +167,7 @@ def calculate_gauge_value(
             abs(
                 needle -
                 unwrapped_ticks[-1]
-            ) < 2.0
+            ) <= 2.0
         ):
 
             return (
@@ -162,6 +184,10 @@ def calculate_gauge_value(
             "between gauge ticks."
         )
 
+    # -----------------------------------------
+    # Get surrounding tick angles
+    # -----------------------------------------
+
     lower_angle = (
         unwrapped_ticks[
             lower_index
@@ -175,7 +201,7 @@ def calculate_gauge_value(
     )
 
     # -----------------------------------------
-    # Calculate position between ticks
+    # Calculate angular distance
     # -----------------------------------------
 
     angular_distance = (
@@ -184,23 +210,29 @@ def calculate_gauge_value(
     )
 
     if angular_distance <= 0:
+
         raise ValueError(
             "Invalid tick spacing."
         )
+
+    # -----------------------------------------
+    # Calculate position between ticks
+    # -----------------------------------------
 
     fraction = (
         needle -
         lower_angle
     ) / angular_distance
 
-    # Keep numerical noise within range
+    # Prevent tiny numerical errors
+    # from producing values outside 0-1.
     fraction = max(
         0.0,
         min(1.0, fraction)
     )
 
     # -----------------------------------------
-    # Continuous gauge value
+    # Calculate continuous RPM
     # -----------------------------------------
 
     value = (
